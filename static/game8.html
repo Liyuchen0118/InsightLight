@@ -68,6 +68,10 @@
         #startBtn { padding: 12px 30px; font-size: 1.2rem; background-color: #10b981; color: white; border: none; border-radius: 8px; cursor: pointer; margin-top: 20px; transition: background-color 0.2s; }
         #startBtn:disabled { background-color: #9ca3af; cursor: not-allowed; }
 
+        /* 新增：提前结束按钮的样式 */
+        #earlyEndBtn { padding: 12px 18px; font-size: 1.0rem; background-color: #dc2626; color: white; border: none; border-radius: 8px; cursor: pointer; margin-left: 10px; display: none; }
+        #earlyEndBtn:disabled { opacity: 0.6; cursor: not-allowed; }
+
         /* “下一题”按钮的样式 (保持不变) */
         .next-button-container { position: fixed; right: 40px; bottom: 40px; z-index: 1000; }
         .next-button-container .btn { background-color: #10b981; padding: 12px 30px; font-size: 1.1rem; font-weight: 500; color: white; text-decoration: none; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
@@ -83,7 +87,11 @@
     
     <div id="timer-display">60</div>
     <textarea id="word-input" placeholder="请在这里输入..."></textarea>
-    <button id="startBtn">开始挑战</button>
+    <div style="margin-top:12px;">
+        <button id="startBtn">开始挑战</button>
+        <!-- 新增：提前结束红色按钮（初始隐藏） -->
+        <button id="earlyEndBtn" title="提前结束并提交分数">提前结束</button>
+    </div>
 </div>
 <div class="home-button-container">
     {% if next_game_url %}
@@ -112,6 +120,7 @@ $(document).ready(function() {
     const $timerDisplay = $('#timer-display');
     const $wordInput = $('#word-input');
     const $startBtn = $('#startBtn');
+    const $earlyEndBtn = $('#earlyEndBtn'); // 新增引用
 
     // --- 2. 核心函数 ---
 
@@ -124,6 +133,9 @@ $(document).ready(function() {
         $wordInput.val('').prop('disabled', true);
         $startBtn.prop('disabled', false).text('开始挑战');
         $('.next-button-container').hide();
+
+        // 新增：初始化时隐藏并启用“提前结束”按钮
+        $earlyEndBtn.hide().prop('disabled', false);
     }
 
     function startGame() {
@@ -133,6 +145,9 @@ $(document).ready(function() {
         
         gameState.isGameActive = true;
         gameState.timerInterval = setInterval(updateTimer, 1000);
+
+        // 新增：开始时显示“提前结束”按钮
+        $earlyEndBtn.show();
     }
     
     function updateTimer() {
@@ -140,22 +155,28 @@ $(document).ready(function() {
         $timerDisplay.text(gameState.timeLeft);
         
         if (gameState.timeLeft <= 0) {
-            finishGame();
+            // 明确表示为正常结束（非提前）
+            finishGame(false);
         }
     }
     
-    function finishGame() {
+    // 修改：让 finishGame 接受一个参数 endedEarly（默认为 false）
+    function finishGame(endedEarly = false) {
         gameState.isGameActive = false;
         clearInterval(gameState.timerInterval);
         
         $wordInput.prop('disabled', true);
         $startBtn.prop('disabled', false).text('再玩一次');
-        
+
+        // 新增：结束时隐藏“提前结束”按钮
+        $earlyEndBtn.hide();
+
         const score = calculateScore();
         // alert(`时间到！您一共输入了 ${score.wordCount} 个有效词语，得分: ${score.finalScore}`);
         
         const currentResultId = $('body').data('result-id');
-        updateResult(currentResultId, { "language": score.finalScore });
+        // 传递 ended_early 标志到后端（后端若没有该字段不会报错，但无法保存）
+        updateResult(currentResultId, { "language": score.finalScore, "ended_early": endedEarly });
     }
     
     // 计分逻辑
@@ -177,43 +198,53 @@ $(document).ready(function() {
     }
 
     // AJAX 更新函数
-            function showNotification(message, type) {
-            const $toast = $('#toast');
-            // 设置消息和样式 (success 或 error)
-            $toast.text(message).removeClass('success error').addClass(type);
-            
-            // 显示并触发CSS动画
-            $toast.addClass('show');
+    function showNotification(message, type) {
+        const $toast = $('#toast');
+        // 设置消息和样式 (success 或 error)
+        $toast.text(message).removeClass('success error').addClass(type);
+        
+        // 显示并触发CSS动画
+        $toast.addClass('show');
 
-            // 3秒后自动隐藏
-            setTimeout(function() {
-                $toast.removeClass('show');
-            }, 3000);
-        }
-        function updateResult(resultId, dataToUpdate) {
-            if (!resultId) { console.error("ID不存在!"); return; }
-            $.ajax({
-                url: `/api/results/${resultId}/`,
-                type: 'PATCH',
-                contentType: 'application/json',
-                data: JSON.stringify(dataToUpdate),
-                success: function(response) {
-                    console.log('更新成功!', response);
-                    showNotification('分数已成功提交！', 'success');
-                    // ✅ 新增3: AJAX请求成功后，显示“下一题”按钮
-                    $('.next-button-container').show();
-                    $('#checkDateBtn').prop('disabled', true); // 禁用“确认日期”按钮
-                },
-                error: function(error) {
-                    console.error('更新失败:', error);
-                    showNotification('提交失败，请稍后再试。', 'error');
-                }
-            });
-        }
+        // 3秒后自动隐藏
+        setTimeout(function() {
+            $toast.removeClass('show');
+        }, 3000);
+    }
+    function updateResult(resultId, dataToUpdate) {
+        if (!resultId) { console.error("ID不存在!"); return; }
+        $.ajax({
+            url: `/api/results/${resultId}/`,
+            type: 'PATCH',
+            contentType: 'application/json',
+            data: JSON.stringify(dataToUpdate),
+            success: function(response) {
+                console.log('更新成功!', response);
+                showNotification('分数已成功提交！', 'success');
+                // ✅ 新增3: AJAX请求成功后，显示“下一题”按钮
+                $('.next-button-container').show();
+                $('#checkDateBtn').prop('disabled', true); // 禁用“确认日期”按钮
+            },
+            error: function(error) {
+                console.error('更新失败:', error);
+                showNotification('提交失败，请稍后再试。', 'error');
+            }
+        });
+    }
 
 
     // --- 3. 事件绑定与初始化 ---
     $startBtn.on('click', startGame);
+
+    // 新增：提前结束绑定（弹窗确认后标记 endedEarly = true）
+    $earlyEndBtn.on('click', function(){
+        if (!gameState.isGameActive) return;
+        const ok = confirm('确定要提前结束本轮挑战并提交当前得分吗？');
+        if (!ok) return;
+        // 传 true 表示提前结束
+        finishGame(true);
+    });
+
     initGame(); // 初始化页面
 });
 </script>
